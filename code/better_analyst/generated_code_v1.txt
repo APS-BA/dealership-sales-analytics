@@ -1,0 +1,246 @@
+================================================================================
+BETTER ANALYST — GENERATED PYTHON SOURCE (v1, 437 lines)
+Extracted verbatim from the Better Analyst session on 14 Sep 2026.
+
+PROVENANCE
+  This is the code the Better Analyst platform wrote and executed in its own
+  sandbox to produce workbook v1. It is included as a record of a tool used,
+  per the submission requirement.
+
+TWO IMPORTANT NOTES
+  1. This code CONTAINS THE METHODOLOGICAL ERROR described in TOOL_LOG.md.
+     The line beginning `cat_fy = raw.groupby(["CATEGORY", "FISCAL_YEAR"]...`
+     attributes invoice-level GRANDAMOUNT to every category on the invoice,
+     double-counting multi-category invoices. It is preserved here unaltered
+     because the error and its correction form part of the project's method
+     (see report Section 4). DO NOT use these figures.
+
+  2. Indentation is not preserved. The platform's text export flattens it.
+     This file is therefore a RECORD, not a runnable script. The runnable,
+     corrected analysis is Code/analysis.py in this submission.
+
+  Sandbox paths (/home/user/workspace/...) are the platform's own, not ours.
+================================================================================
+
+from pathlib import Path
+from datetime import datetime
+from itertools import combinations
+import math, re, json, os
+import pandas as pd
+import numpy as np
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import ColorScaleRule
+
+source_paths = [
+("/home/user/workspace/1788497160280_SALE_DATA_2324.xlsx", "FY2023-24"),
+("/home/user/workspace/1788497159764_SALE_DATA_2425_NEW.xlsx", "FY2024-25"),
+("/home/user/workspace/1788497160021_SALE_DATA.xlsx", "FY2025-26"),
+]
+for source_path, _fy in source_paths:
+p = Path(source_path)
+if not p.is_file():
+raise ValueError(f"Missing source file: {source_path}")
+print(f"AUDIT: source={source_path}")
+
+# Load the three registers from Sheet1 and union their observed columns.
+frames = []
+source_rows = []
+for source_path, fy in source_paths:
+df0 = pd.read_excel(source_path, sheet_name="Sheet1")
+df0.columns = [str(c).strip() for c in df0.columns]
+df0["FISCAL_YEAR"] = fy
+frames.append(df0)
+source_rows.append((fy, len(df0), list(df0.columns)))
+
+all_cols = []
+for df0 in frames:
+for c in df0.columns:
+if c not in all_cols:
+all_cols.append(c)
+raw = pd.concat([df0.reindex(columns=all_cols) for df0 in frames], ignore_index=True)
+raw_row_count = len(raw)
+
+# Remove exact duplicates after union alignment.
+raw = raw.drop_duplicates(keep="first").reset_index(drop=True)
+duplicate_rows_removed = raw_row_count - len(raw)
+
+# Type-safe preprocessing.
+raw["INVOICEDATE_clean"] = pd.to_datetime(raw["INVOICEDATE"], dayfirst=True, errors="coerce")
+raw["HSNCODE_clean"] = pd.to_numeric(raw["HSNCODE"], errors="coerce")
+raw["BASICRATE_clean"] = pd.to_numeric(raw["BASICRATE"], errors="coerce")
+raw["GSTRATE_clean"] = pd.to_numeric(raw["GSTRATE"], errors="coerce")
+raw["GRANDAMOUNT_clean"] = pd.to_numeric(raw["GRANDAMOUNT"], errors="coerce")
+raw["MONTH"] = raw["INVOICEDATE_clean"].dt.month
+raw["FISCAL_MONTH"] = ((raw["MONTH"] - 4) % 12) + 1
+
+hsn_map = {
+"841510": "Air Conditioner",
+"852872": "Television",
+"841810": "Refrigerator",
+"84501100": "Washing Machine Automatic",
+"84501200": "Washing Machine Semi-Automatic",
+"842121": "Water Purifier RO",
+}
+raw["HSNCODE_KEY"] = raw["HSNCODE_clean"].map(lambda x: str(int(x)) if pd.notna(x) else "")
+raw["CATEGORY"] = raw["HSNCODE_KEY"].map(hsn_map).fillna("Other")
+raw["ZERO_VALUE_FLAG"] = raw["GSTRATE_clean"].fillna(0).eq(0)
+raw["BAD_SKU_FLAG"] = raw["PRODUCT"].astype("string").fillna("").str.strip().str.fullmatch(r"[0-9]+", na=False)
+raw["CASH_CUSTOMER_FLAG"] = raw["CUSTOMERNAME"].astype("string").fillna("").str.upper().str.contains("CASH CUSTOMER", regex=False, na=False)
+raw["BRANCH"] = raw["INVOICENO"].astype("string").fillna("").str.split("/", n=1).str[0].str.strip()
+
+# Cleaned master columns: keep all original union columns and add derived fields; do not retain helper clean columns.
+helper_cols = {"INVOICEDATE_clean", "HSNCODE_clean", "BASICRATE_clean", "GSTRATE_clean", "GRANDAMOUNT_clean", "HSNCODE_KEY"}
+cleaned_cols = [c for c in raw.columns if c not in helper_cols]
+cleaned = raw[cleaned_cols].copy()
+
+# Invoice-level table: distinct invoice amount, customer, branch, date, fiscal year, and category list.
+invoice_group_cols = ["INVOICENO", "INVOICEDATE_clean", "FISCAL_YEAR", "CUSTOMERNAME", "BRANCH", "CASH_CUSTOMER_FLAG"]
+invoice_rows = []
+for invoice_no, g in raw.groupby("INVOICENO", dropna=False, sort=False):
+cats = sorted(set([str(x) for x in g["CATEGORY"].dropna().tolist() if str(x).strip()]))
+first = g.iloc[0]
+amounts = pd.to_numeric(g["GRANDAMOUNT_clean"], errors="coerce").dropna().unique()
+amount = float(amounts[0]) if len(amounts) else None
+invoice_rows.append({
+"INVOICENO": invoice_no,
+"INVOICEDATE": first["INVOICEDATE_clean"],
+"FISCAL_YEAR": first["FISCAL_YEAR"],
+"CUSTOMERNAME": first["CUSTOMERNAME"],
+"BRANCH": first["BRANCH"],
+"CASH_CUSTOMER_FLAG": bool(first["CASH_CUSTOMER_FLAG"]),
+"GRANDAMOUNT": amount,
+"CATEGORIES": "; ".join(cats),
+"CATEGORY_COUNT": len(cats),
+})
+invoices = pd.DataFrame(invoice_rows)
+invoices["INVOICEDATE"] = pd.to_datetime(invoices["INVOICEDATE"], errors="coerce")
+invoices["FISCAL_MONTH"] = ((invoices["INVOICEDATE"].dt.month - 4) % 12) + 1
+
+# Use distinct invoice amounts for revenue analyses.
+valid_invoice = invoices[invoices["GRANDAMOUNT"].notna()].copy()
+valid_invoice["GRANDAMOUNT"] = pd.to_numeric(valid_invoice["GRANDAMOUNT"], errors="coerce")
+
+# ===========================================================================
+# *** THE METHODOLOGICAL ERROR IS ON THE NEXT LINE ***
+# GRANDAMOUNT is an INVOICE-level total but CATEGORY is a LINE-level
+# attribute, so this counts every multi-category invoice two or more times.
+# Corrected in v2 to LINE_REVENUE = TOTAL + CGSTAMT + SGSTAMT + IGSTAMT.
+# ===========================================================================
+# Analysis A: category x FY revenue, fiscal-month revenue, pooled category x fiscal month.
+cat_fy = raw.groupby(["CATEGORY", "FISCAL_YEAR"], dropna=False)["GRANDAMOUNT_clean"].agg(lambda s: pd.to_numeric(s, errors="coerce").drop_duplicates().sum())
+# Distinct invoice revenue by fiscal year and month.
+month_fy = valid_invoice.groupby(["FISCAL_MONTH", "FISCAL_YEAR"], dropna=False)["GRANDAMOUNT"].sum().reset_index()
+# Category revenue by fiscal month uses line-level categories with invoice amount allocated once across categories on that invoice to avoid double counting.
+cat_invoice = raw[["INVOICENO", "CATEGORY"]].drop_duplicates()
+cat_invoice = cat_invoice.merge(valid_invoice[["INVOICENO", "GRANDAMOUNT", "FISCAL_MONTH", "FISCAL_YEAR"]], on="INVOICENO", how="left")
+cat_invoice["CATEGORY_COUNT"] = cat_invoice.groupby("INVOICENO")["CATEGORY"].transform("count")
+cat_invoice["ALLOCATED_REVENUE"] = cat_invoice["GRANDAMOUNT"] / cat_invoice["CATEGORY_COUNT"].replace(0, np.nan)
+cat_month = cat_invoice.groupby(["CATEGORY", "FISCAL_MONTH"], dropna=False)["ALLOCATED_REVENUE"].sum().reset_index()
+
+# Analysis B: basket metrics.
+def basket_metrics(basket_sets, label):
+basket_sets = [set(x) for x in basket_sets if len(set(x)) > 0]
+n = len(basket_sets)
+cat_counts = {}
+pair_counts = {}
+for s in basket_sets:
+for c in s:
+cat_counts[c] = cat_counts.get(c, 0) + 1
+for a, b in combinations(sorted(s), 2):
+pair_counts[(a, b)] = pair_counts.get((a, b), 0) + 1
+rows = []
+for (a, b), cnt in sorted(pair_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+support = cnt / n if n else 0
+conf_ab = cnt / cat_counts[a] if cat_counts.get(a, 0) else 0
+conf_ba = cnt / cat_counts[b] if cat_counts.get(b, 0) else 0
+support_a = cat_counts[a] / n if n else 0
+support_b = cat_counts[b] / n if n else 0
+lift = support / (support_a * support_b) if support_a and support_b else 0
+rows.append({"BASKET_TYPE": label, "CATEGORY_A": a, "CATEGORY_B": b, "BASKETS": n, "PAIR_BASKETS": cnt, "SUPPORT": support, "CONFIDENCE_A_TO_B": conf_ab, "CONFIDENCE_B_TO_A": conf_ba, "LIFT": lift})
+return pd.DataFrame(rows)
+
+invoice_sets = valid_invoice["CATEGORIES"].fillna("").map(lambda s: [x.strip() for x in s.split(";") if x.strip()])
+basket_invoice = basket_metrics(invoice_sets.tolist(), "Invoice basket")
+
+named_invoices = valid_invoice[~valid_invoice["CASH_CUSTOMER_FLAG"]].copy()
+named_customer_sets = named_invoices.groupby("CUSTOMERNAME")["CATEGORIES"].apply(lambda s: sorted(set(sum(([x.strip() for x in str(v).split(";") if x.strip()] for v in s), []))))
+basket_customer = basket_metrics(named_customer_sets.tolist(), "Named customer basket")
+basket_pairs = pd.concat([basket_invoice, basket_customer], ignore_index=True)
+
+# Customer single vs multi category by fiscal year.
+customer_fy_cats = named_invoices.groupby(["FISCAL_YEAR", "CUSTOMERNAME"])["CATEGORIES"].apply(lambda s: len(set(sum(([x.strip() for x in str(v).split(";") if x.strip()] for v in s), [])))).reset_index(name="CATEGORY_COUNT")
+customer_fy_spend = named_invoices.groupby(["FISCAL_YEAR", "CUSTOMERNAME"])["GRANDAMOUNT"].sum().reset_index(name="TOTAL_SPEND")
+customer_mix = customer_fy_cats.merge(customer_fy_spend, on=["FISCAL_YEAR", "CUSTOMERNAME"], how="left")
+customer_mix["CUSTOMER_TYPE"] = np.where(customer_mix["CATEGORY_COUNT"] <= 1, "Single-category", "Multi-category")
+customer_mix_summary = customer_mix.groupby(["FISCAL_YEAR", "CUSTOMER_TYPE"]).agg(CUSTOMERS=("CUSTOMERNAME", "nunique"), AVG_TOTAL_SPEND=("TOTAL_SPEND", "mean"), TOTAL_REVENUE=("TOTAL_SPEND", "sum")).reset_index()
+
+# Analysis C: product-normalized pricing index.
+price = raw[["PRODUCT", "CATEGORY", "FISCAL_MONTH", "BASICRATE_clean"]].copy()
+price = price[price["BASICRATE_clean"] > 0].copy()
+product_means = price.groupby("PRODUCT")["BASICRATE_clean"].mean().rename("PRODUCT_MEAN_BASICRATE")
+price = price.join(product_means, on="PRODUCT")
+price["PRICE_INDEX"] = price["BASICRATE_clean"] / price["PRODUCT_MEAN_BASICRATE"]
+price_month = price.groupby(["CATEGORY", "FISCAL_MONTH"], dropna=False)["PRICE_INDEX"].mean().reset_index(name="AVG_PRICE_INDEX")
+price_cv = price_month.groupby("CATEGORY")["AVG_PRICE_INDEX"].agg(["mean", "std"]).reset_index()
+price_cv["COEFFICIENT_OF_VARIATION"] = price_cv["std"] / price_cv["mean"].replace(0, np.nan)
+price_cv = price_cv[["CATEGORY", "COEFFICIENT_OF_VARIATION"]]
+price_month = price_month.merge(price_cv, on="CATEGORY", how="left")
+
+# Analysis D: RFM for named customers only.
+rfm_invoices = valid_invoice[~valid_invoice["CASH_CUSTOMER_FLAG"]].copy()
+last_date = valid_invoice["INVOICEDATE"].max()
+rfm = rfm_invoices.groupby("CUSTOMERNAME").agg(LAST_INVOICE_DATE=("INVOICEDATE", "max"), FREQUENCY=("INVOICENO", "nunique"), MONETARY=("GRANDAMOUNT", "sum")).reset_index()
+rfm["RECENCY_DAYS"] = (last_date - rfm["LAST_INVOICE_DATE"]).dt.days
+
+def quintile_score(series, ascending=True):
+ranks = series.rank(method="first", ascending=ascending)
+return pd.qcut(ranks, 5, labels=[1, 2, 3, 4, 5]).astype(int)
+
+rfm["R_SCORE"] = quintile_score(rfm["RECENCY_DAYS"], ascending=False)
+rfm["F_SCORE"] = quintile_score(rfm["FREQUENCY"], ascending=True)
+rfm["M_SCORE"] = quintile_score(rfm["MONETARY"], ascending=True)
+rfm["RFM_SCORE"] = rfm["R_SCORE"].astype(str) + rfm["F_SCORE"].astype(str) + rfm["M_SCORE"].astype(str)
+def segment(row):
+if row["R_SCORE"] >= 4 and row["F_SCORE"] >= 4 and row["M_SCORE"] >= 4:
+return "Champions"
+if row["R_SCORE"] >= 3 and row["F_SCORE"] >= 3 and row["M_SCORE"] >= 3:
+return "Loyal"
+if row["RECENCY_DAYS"] <= 90 and row["F_SCORE"] <= 2:
+return "New"
+if row["R_SCORE"] <= 3 and row["F_SCORE"] >= 3:
+return "At Risk"
+if row["R_SCORE"] <= 2 and row["F_SCORE"] <= 2:
+return "Lost"
+return "Potential Loyalist"
+rfm["SEGMENT"] = rfm.apply(segment, axis=1)
+segment_summary = rfm.groupby("SEGMENT").agg(CUSTOMERS=("CUSTOMERNAME", "nunique"), REVENUE=("MONETARY", "sum"), AVG_MONETARY=("MONETARY", "mean"), AVG_FREQUENCY=("FREQUENCY", "mean"), AVG_RECENCY_DAYS=("RECENCY_DAYS", "mean")).reset_index()
+segment_summary["REVENUE_SHARE"] = segment_summary["REVENUE"] / segment_summary["REVENUE"].sum()
+segment_summary = segment_summary.sort_values("REVENUE", ascending=False)
+
+# Findings summary values.
+total_revenue = float(valid_invoice["GRANDAMOUNT"].sum())
+invoice_count = int(valid_invoice["INVOICENO"].nunique())
+named_customer_count = int(rfm["CUSTOMERNAME"].nunique())
+top_category = raw.groupby("CATEGORY")["GRANDAMOUNT_clean"].agg(lambda s: pd.to_numeric(s, errors="coerce").drop_duplicates().sum()).sort_values(ascending=False).index[0]
+top_category_revenue = float(raw.groupby("CATEGORY")["GRANDAMOUNT_clean"].agg(lambda s: pd.to_numeric(s, errors="coerce").drop_duplicates().sum()).sort_values(ascending=False).iloc[0])
+
+# ---------------------------------------------------------------------------
+# Workbook construction (openpyxl): theme, sheet setup, table writer, and the
+# README / DATA DICTIONARY / PREPROCESSING LOG / CLEANED DATA / INVOICE LEVEL /
+# ANALYSIS A-D / FINDINGS SUMMARY sheets, followed by global formatting and a
+# semantic manifest. Full styling code continues to line 437.
+# ---------------------------------------------------------------------------
+THEME = {"primary":"1F4E79", "light":"D6E3F0", "accent":"2E75B6", "green":"2E7D32", "red":"C62828", "gray":"666666", "light_gray":"F3F6F9"}
+wb = Workbook()
+wb.remove(wb.active)
+
+output_path = "/home/user/workspace/outputs/lg_kent_marketing_analytics_fy23_26.xlsx"
+wb.save(output_path)
+print(f"AUDIT: source rows by fiscal year={source_rows}")
+print(f"AUDIT: unioned rows={raw_row_count}; exact duplicates removed={duplicate_rows_removed}; cleaned rows={len(cleaned)}")
+print(f"AUDIT: distinct invoices={invoice_count}; named customers={named_customer_count}; total revenue={total_revenue:.2f}")
+print(f"AUDIT: workbook sheets={wb.sheetnames}")
+print(f"SAVED: {output_path} exists={os.path.exists(output_path)} size_bytes={os.path.getsize(output_path)}")
