@@ -1,0 +1,232 @@
+
+================================================================================
+DATA-DRIVEN MARKETING — COURSE PROJECT
+Structural Category Decline and the Cross-Sell Opportunity
+Multi-branch consumer durables dealership, Varanasi (U.P.)
+
+Group 02, Section A
+
+WHAT THIS SCRIPT DOES
+---------------------
+Reproduces the ENTIRE analysis from the three raw GST sales registers and
+regenerates the submitted Excel workbook. Nothing is hard-coded: every figure
+quoted in the report is computed here from the raw files.
+
+HOW TO RUN
+----------
+    pip install pandas numpy openpyxl
+    python analysis.py
+
+Place the three raw files in the SAME folder as this script (or edit DATA_DIR):
+    SALE_DATA_2324.xlsx        -> FY2023-24
+    SALE_DATA_2425_NEW.xlsx    -> FY2024-25
+    SALE_DATA.xlsx             -> FY2025-26
+
+Outputs:
+    LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx   (16-sheet workbook)
+    console log of all key figures, for verification against the report
+
+Runtime: ~2-3 minutes (the market-basket pass over 36,056 invoices dominates).
+
+TWO CORRECTIONS IMPLEMENTED HERE (see report Section 4)
+-------------------------------------------------------
+1. LINE-LEVEL REVENUE. Category is a LINE-level attribute; GRANDAMOUNT is an
+   INVOICE-level total. Attributing GRANDAMOUNT to each category on an invoice
+   double-counts every multi-category invoice. We therefore use
+   LINE_REVENUE = TOTAL + CGSTAMT + SGSTAMT + IGSTAMT, which reconciles to
+   ~100.1% of distinct-invoice GRANDAMOUNT in all three years (asserted below).
+
+2. LIKE-FOR-LIKE WINDOW. FY2024-25 is missing most Feb-Mar billing (298 and 35
+   invoices vs ~800 and ~1,100 in adjacent years). All year-on-year comparison
+   therefore runs on fiscal months 1-10 (April-January).
+================================================================================
+
+
+==============================================================================
+STEP 1 — LOAD AND PREPROCESS
+==============================================================================
+  loaded SALE_DATA_2324.xlsx        ->  24,052 rows  (FY2023-24)
+  loaded SALE_DATA_2425_NEW.xlsx    ->  20,634 rows  (FY2024-25)
+  loaded SALE_DATA.xlsx             ->  22,655 rows  (FY2025-26)
+
+  common columns across all three files: 37
+  raw rows                 : 67,341
+  exact duplicates removed : 7
+  cleaned master rows      : 67,334
+  zero-value lines flagged : 3,372
+  numeric-only SKUs flagged: 187
+  cash-customer lines      : 4,342  (excluded from customer analysis)
+  CHECK: GRANDAMOUNT constant within every invoice ....... OK
+
+==============================================================================
+STEP 2 — RECONCILIATION CHECK (validates the line-level revenue basis)
+==============================================================================
+  FY2023-24: line     435,457,081 / invoice     435,000,673 = 1.00105
+  FY2024-25: line     375,665,606 / invoice     375,354,090 = 1.00083
+  FY2025-26: line     410,428,892 / invoice     410,127,123 = 1.00074
+  CHECK: all three years reconcile within +/-1% ........... OK
+  (Under the erroneous invoice-attribution method the category
+   parts EXCEEDED the whole by roughly 2x — see report Section 4.)
+
+==============================================================================
+ANALYSIS A — CATEGORY REVENUE AND SEASONALITY
+==============================================================================
+
+  FULL-YEAR (contaminated by the FY2024-25 Feb-Mar gap):
+    Air Conditioner                     139,511,416    149,978,183    166,097,409
+    Television                           88,514,554     63,578,447     69,894,293
+    Refrigerator                         79,051,398     63,930,849     68,593,837
+    Other                                59,999,720     47,725,059     53,557,597
+    Washing Machine Automatic            43,531,605     31,283,790     30,656,039
+    Washing Machine Semi-Automatic       18,105,668     14,169,605     16,260,717
+    Water Purifier RO                     6,742,720      4,999,671      5,369,000
+    TOTAL                               435,457,081    375,665,606    410,428,892
+    YoY: -13.7%  then  +9.3%   <- the ARTEFACT
+
+  LIKE-FOR-LIKE April-January (the reliable view):
+    Air Conditioner                     116,949,119    143,419,756    136,574,334   2-yr  +16.8%
+    Television                           74,621,782     60,890,400     56,528,968   2-yr  -24.2%
+    Refrigerator                         65,403,492     61,576,644     54,932,988   2-yr  -16.0%
+    Other                                49,811,220     45,745,746     44,752,275   2-yr  -10.2%
+    Washing Machine Automatic            36,853,118     29,468,022     25,067,175   2-yr  -32.0%
+    Washing Machine Semi-Automatic       15,219,184     13,610,144     13,406,423   2-yr  -11.9%
+    Water Purifier RO                     5,600,618      4,901,071      4,456,150   2-yr  -20.4%
+    TOTAL                               364,458,534    359,611,784    335,718,314   2-yr   -7.9%
+    YoY: -1.3%  then  -6.6%   <- erosion, no V
+
+  Seasonality — share of annual revenue:
+    FY2023-24: Apr-Jun 39.0%   Jul-Sep 12.8%
+    FY2024-25: Apr-Jun 48.6%   Jul-Sep 12.7%
+    FY2025-26: Apr-Jun 41.6%   Jul-Sep 12.0%
+
+==============================================================================
+DATA GAP CHECK — why the like-for-like window is necessary
+==============================================================================
+  Invoice counts by fiscal month:
+    Month     FY2023-24    FY2024-25    FY2025-26
+    Apr           1,798        2,202        1,941
+    May           1,633        1,835        1,797
+    Jun           1,700        1,488        1,213
+    Jul             720          649          621
+    Aug             586          447          449
+    Sep             506          386          475
+    Oct             688        1,339        1,216
+    Nov           1,716        1,054          961
+    Dec             836          668          756
+    Jan             798          687          679
+    Feb             817          298          741
+    Mar           1,072           35        1,249   <-- INCOMPLETE
+
+  Feb+Mar revenue: 70,913,443 | 16,053,821 | 74,666,927
+  Estimated FY2024-25 shortfall: 56,736,364
+  A dealership does not fall to 35 invoices in March and recover to
+  1,249 the next year. This is a truncated export, not a collapse.
+
+==============================================================================
+ANALYSIS B — MARKET BASKET: SUPPORT, CONFIDENCE, LIFT
+==============================================================================
+  invoice baskets : 36,056
+  customer baskets: 19,736
+
+  INVOICE-LEVEL, by lift (support / conf A->B / conf B->A / lift):
+    Television             + Washing Machine Semi-A 0.0353 0.167 0.342 1.611
+    Refrigerator           + Washing Machine Semi-A 0.0440 0.160 0.426 1.547
+    Television             + Washing Machine Automa 0.0367 0.173 0.323 1.523
+    Television             + Refrigerator           0.0790 0.373 0.287 1.354
+    Refrigerator           + Washing Machine Automa 0.0401 0.146 0.353 1.284
+    Washing Machine Automa + Water Purifier RO      0.0037 0.032 0.122 1.077
+    Other                  + Washing Machine Automa 0.0444 0.116 0.391 1.021
+    Television             + Other                  0.0813 0.383 0.212 1.001
+    Other                  + Washing Machine Semi-A 0.0386 0.101 0.373 0.973
+    Refrigerator           + Other                  0.0902 0.328 0.236 0.856
+    Air Conditioner        + Washing Machine Automa 0.0274 0.096 0.242 0.849  <-- AC negative
+    Other                  + Water Purifier RO      0.0095 0.025 0.318 0.829
+    Air Conditioner        + Television             0.0422 0.148 0.199 0.700  <-- AC negative
+    Television             + Water Purifier RO      0.0041 0.019 0.136 0.642
+    Air Conditioner        + Other                  0.0670 0.235 0.175 0.615  <-- AC negative
+    Refrigerator           + Water Purifier RO      0.0048 0.017 0.160 0.582
+    Air Conditioner        + Refrigerator           0.0449 0.158 0.163 0.574  <-- AC negative
+    Air Conditioner        + Washing Machine Semi-A 0.0158 0.056 0.153 0.537  <-- AC negative
+    Air Conditioner        + Water Purifier RO      0.0040 0.014 0.135 0.475  <-- AC negative
+    Washing Machine Semi-A + Water Purifier RO      0.0012 0.012 0.042 0.403
+    Washing Machine Automa + Washing Machine Semi-A 0.0003 0.003 0.003 0.028
+
+  WHY LIFT AND NOT CONFIDENCE ALONE:
+    Highest confidence rule : Washing Machine Semi-Automatic -> Refrigerator conf 0.426, support 0.0440, but LIFT 1.547
+    Highest lift rule       : Television -> Washing Machine Semi-Automatic conf 0.167, support 0.0353, LIFT 1.611
+    -> acting on confidence alone promotes a negatively associated rule.
+
+  AC lift range — invoice : 0.475 to 0.849
+  AC lift range — customer: 0.707 to 0.960
+  AC is below 1.0 against EVERY category at BOTH levels — not a timing artefact.
+
+  CROSS-SELL VALUE GAP:
+    FY2023-24: multi 2,474 @ 111,253 | single 4,412 @ 30,940 | ratio 3.60x | single share 64.1%
+    FY2024-25: multi 2,049 @ 114,012 | single 3,917 @ 31,049 | ratio 3.67x | single share 65.7%
+    FY2025-26: multi 2,445 @ 96,387 | single 5,554 @ 28,728 | ratio 3.36x | single share 69.4%
+
+==============================================================================
+ANALYSIS C — SEASONAL PRICING (product-normalised index)
+==============================================================================
+  Coefficient of variation of the monthly price index:
+    Television                       0.0128   <-- no weather seasonality, yet MORE volatile
+    Washing Machine Semi-Automatic   0.0118
+    Water Purifier RO                0.0080
+    Air Conditioner                  0.0072   <-- most seasonal DEMAND, near-flat PRICE
+    Other                            0.0068
+    Refrigerator                     0.0062
+    Washing Machine Automatic        0.0055
+
+  AC demand index vs price index by fiscal month:
+    Apr  demand  2.64   price 0.994
+    May  demand  2.51   price 0.996
+    Jun  demand  2.11   price 1.010
+    Jul  demand  0.69   price 0.990
+    Aug  demand  0.37   price 0.992
+    Sep  demand  0.38   price 1.001
+    Oct  demand  0.44   price 1.005
+    Nov  demand  0.58   price 1.004
+    Dec  demand  0.28   price 0.994
+    Jan  demand  0.45   price 1.005
+    Feb  demand  0.54   price 1.012
+    Mar  demand  1.01   price 1.003
+
+  AC demand swing (max/min month): 9.4x
+  AC price movement across the year: 0.72%
+  CAVEAT: these are negotiated transaction prices, not a controlled
+  experiment. The flatness is robust; causal elasticity is NOT tested.
+
+==============================================================================
+ANALYSIS D — RFM SEGMENTATION (recalibrated for durables)
+==============================================================================
+  snapshot date: 2026-03-31
+
+  named customers: 19,736 | total monetary: 1,162,198,532
+  Segment                  customers        revenue   share   avgF   avgR
+    Potential Loyalist         7,536    303,475,328  26.11%   1.11    201
+    Champions                    351    283,081,361  24.36%  28.21    387
+    At Risk (high value)       2,965    225,041,912  19.36%   1.25    874
+    Needs Attention            3,688    167,008,032  14.37%   1.15    546
+    Lapsed / Not Yet Due       4,667    109,707,367   9.44%   1.04    885
+    Loyal                        529     73,884,532   6.36%   3.02    512
+
+  Q6 EVIDENCE — is RFM valid here?
+    customers with exactly ONE invoice in 3 years: 16,541 (83.8%)
+    mean frequency                               : 1.66
+    median recency                               : 526 days
+    -> F is near-degenerate; RFM collapses toward an R-M map and any
+       CHURN reading is invalid. On decade-cycle goods a low F score is
+       a SATISFIED customer. Valid use = value concentration/contactability:
+    top 10% of customers = 46.1% of revenue
+    top 20% of customers = 59.9% of revenue
+
+==============================================================================
+BUILDING THE WORKBOOK
+==============================================================================
+prep done 67334 36056 19736
+SAVED /home/claude/submission/DDM_SecA_Group02_Submission/Code/LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx 9091130
+  written: /home/claude/submission/DDM_SecA_Group02_Submission/Code/LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx
+
+==============================================================================
+DONE — all figures above are reproduced in the report and workbook
+==============================================================================
