@@ -9,7 +9,7 @@ have inverted the conclusions.
 
 ![Python](https://img.shields.io/badge/Python-pandas%20%7C%20numpy%20%7C%20openpyxl-3776AB)
 ![Methods](https://img.shields.io/badge/methods-market%20basket%20%7C%20RFM%20%7C%20price%20index-555)
-![Excel](https://img.shields.io/badge/Excel-17--sheet%20workbook-217346)
+![Excel](https://img.shields.io/badge/Excel-15--sheet%20workbook-217346)
 
 ---
 
@@ -59,7 +59,7 @@ found, documented and corrected
 ```
 code/
   analysis.py             Reproduces the full analysis and prints every figure in the report
-  build_workbook.py       Builds the 17-sheet workbook (live formulas, zero errors)
+  build_workbook.py       Builds the full workbook locally (live formulas, zero errors)
   requirements.txt
   RUN_LOG.txt             Console output of a complete verified run
   TOOL_LOG.md             Every tool used, what it produced, and the two errors caught
@@ -70,7 +70,9 @@ code/
     final_workbook_build_v3.py    the tool's final workbook build (like-for-like, gap check, findings)
     session_notes.md              brief, outputs, the error, the correction
 analysis/
-  LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx
+  LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx   15 analysis sheets: data dictionary,
+                                                   cleaning log, gap check, analyses A–D,
+                                                   findings, recommendations, limitations
 report/
   DDM_Final_Report.pdf
 ```
@@ -85,9 +87,10 @@ python analysis.py        # ~2–3 min; also regenerates the workbook
 
 ## Data and privacy
 
-The raw GST sales registers belong to the dealership and are **not published**; the
-scripts expect them in `code/` or `data/`. In the published workbook every named buyer
-is replaced by a consistent pseudonymous ID (`CUST-00001` …), so all counts and results
-are unchanged but no customer can be identified.
+The dealership's sales registers and all row-level transaction data are **not
+published**. The workbook here contains the analysis sheets only. The scripts expect
+the registers in `code/` or `data/`. Running them locally rebuilds the full workbook,
+including the row-level sheets with buyer names, so that output stays private (it is
+listed in `.gitignore`).
 
 **Team:** Aishwarya Pratap Singh, Adarsh, Aniket Mohankar, Anshil Seth, Deepshika Sidar
