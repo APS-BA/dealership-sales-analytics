@@ -62,6 +62,13 @@ code/
   build_workbook.py       Builds the 17-sheet workbook (live formulas, zero errors)
   requirements.txt
   RUN_LOG.txt             Console output of a complete verified run
+  TOOL_LOG.md             Every tool used, what it produced, and the two errors caught
+  llm_usage_log.md        AI-assistance disclosure and the verification standard applied
+  better_analyst/         The AI analytics tool's own output, kept as an audit trail:
+    generated_code_v1.txt         first-pass code, with the category-revenue error left in and annotated
+    correction_category_revenue.py  the fix: line-level revenue that reconciles to invoice totals
+    final_workbook_build_v3.py    the tool's final workbook build (like-for-like, gap check, findings)
+    session_notes.md              brief, outputs, the error, the correction
 analysis/
   LG_Kent_Marketing_Analytics_FY2324_FY2526.xlsx
 report/
