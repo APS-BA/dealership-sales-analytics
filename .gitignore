@@ -1,0 +1,6 @@
+# Raw dealership data is private: never commit it
+data/
+SALE_DATA*.xlsx
+code/LG_Kent_Marketing_Analytics_*.xlsx
+__pycache__/
+*.pyc
